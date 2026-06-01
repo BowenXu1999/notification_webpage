@@ -124,6 +124,20 @@ button {
   white-space: nowrap;
 }
 
+.reminder-action {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.reminder-action p {
+  max-width: 280px;
+  margin-bottom: 0;
+  color: #5b6b82;
+  font-size: 0.84rem;
+  text-align: right;
+}
+
 .task-panel {
   min-width: 0;
   overflow: hidden;
@@ -332,6 +346,14 @@ button {
   .topbar,
   .workspace {
     display: grid;
+  }
+
+  .reminder-action {
+    justify-items: start;
+  }
+
+  .reminder-action p {
+    text-align: left;
   }
 
   .workspace {

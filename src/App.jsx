@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
 const STORAGE_KEY = 'reminder-todos'
+const SETTINGS_KEY = 'reminder-settings'
+const EMAIL_RECIPIENT = 'b62xu@uwaterloo.ca'
 
 const priorities = {
   high: '高',
@@ -44,10 +46,26 @@ function getStatus(todo, now) {
   return '进行中'
 }
 
+function createMailtoHref(todo) {
+  const subject = `待办提醒：${todo.title}`
+  const body = [
+    `事项：${todo.title}`,
+    `备注：${todo.note || '无'}`,
+    `提醒时间：${todo.dueAt ? formatDateTime(todo.dueAt) : '未设置'}`,
+    `优先级：${priorities[todo.priority]}`,
+  ].join('\n')
+
+  return `mailto:${EMAIL_RECIPIENT}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+}
+
 function App() {
   const [todos, setTodos] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
     return saved ? JSON.parse(saved) : []
+  })
+  const [emailReminderEnabled, setEmailReminderEnabled] = useState(() => {
+    const saved = localStorage.getItem(SETTINGS_KEY)
+    return saved ? JSON.parse(saved).emailReminderEnabled : false
   })
   const [form, setForm] = useState(initialForm)
   const [filter, setFilter] = useState('all')
@@ -62,28 +80,62 @@ function App() {
   }, [todos])
 
   useEffect(() => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ emailReminderEnabled }),
+    )
+  }, [emailReminderEnabled])
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30000)
     return () => window.clearInterval(timer)
   }, [])
 
   useEffect(() => {
-    if (notificationPermission !== 'granted') return
+    if (notificationPermission !== 'granted' && !emailReminderEnabled) return
 
-    todos.forEach((todo) => {
+    const dueTodos = todos.filter((todo) => {
       const dueTime = todo.dueAt ? new Date(todo.dueAt).getTime() : 0
-      if (todo.completed || todo.notified || !dueTime || dueTime > now) return
+      const notificationPending =
+        notificationPermission === 'granted' && !todo.notified
+      const emailPending = emailReminderEnabled && !todo.emailDrafted
 
-      new Notification('待办提醒', {
-        body: todo.title,
-      })
-
-      setTodos((current) =>
-        current.map((item) =>
-          item.id === todo.id ? { ...item, notified: true } : item,
-        ),
+      return (
+        !todo.completed &&
+        dueTime &&
+        dueTime <= now &&
+        (notificationPending || emailPending)
       )
     })
-  }, [notificationPermission, now, todos])
+
+    if (dueTodos.length === 0) return
+
+    if (notificationPermission === 'granted') {
+      dueTodos.forEach((todo) => {
+        new Notification('待办提醒', {
+          body: todo.note ? `${todo.title}\n${todo.note}` : todo.title,
+        })
+      })
+    }
+
+    const emailTodo = dueTodos.find((todo) => !todo.emailDrafted)
+    if (emailReminderEnabled && emailTodo) {
+      window.location.href = createMailtoHref(emailTodo)
+    }
+
+    setTodos((current) =>
+      current.map((item) => {
+        const isDue = dueTodos.some((todo) => todo.id === item.id)
+        if (!isDue) return item
+
+        return {
+          ...item,
+          notified: notificationPermission === 'granted' ? true : item.notified,
+          emailDrafted: emailReminderEnabled ? true : item.emailDrafted,
+        }
+      }),
+    )
+  }, [emailReminderEnabled, notificationPermission, now, todos])
 
   const stats = useMemo(() => {
     const active = todos.filter((todo) => !todo.completed).length
@@ -141,6 +193,7 @@ function App() {
         priority: form.priority,
         completed: false,
         notified: false,
+        emailDrafted: false,
         createdAt: new Date().toISOString(),
       },
       ...current,
@@ -160,14 +213,15 @@ function App() {
     setTodos((current) => current.filter((todo) => todo.id !== id))
   }
 
-  async function requestNotifications() {
+  async function enableReminders() {
     if (typeof Notification === 'undefined') {
       setNotificationPermission('unsupported')
-      return
+    } else {
+      const permission = await Notification.requestPermission()
+      setNotificationPermission(permission)
     }
 
-    const permission = await Notification.requestPermission()
-    setNotificationPermission(permission)
+    setEmailReminderEnabled(true)
   }
 
   return (
@@ -177,9 +231,12 @@ function App() {
           <p className="eyebrow">Todo Reminder</p>
           <h1>待办事项提醒</h1>
         </div>
-        <button className="ghost-button" type="button" onClick={requestNotifications}>
-          {notificationPermission === 'granted' ? '通知已开启' : '开启提醒通知'}
-        </button>
+        <div className="reminder-action">
+          <button className="ghost-button" type="button" onClick={enableReminders}>
+            {emailReminderEnabled ? '邮箱提醒已开启' : '开启邮箱提醒'}
+          </button>
+          <p>到期时生成发送给 {EMAIL_RECIPIENT} 的邮件草稿。</p>
+        </div>
       </section>
 
       <section className="workspace">
